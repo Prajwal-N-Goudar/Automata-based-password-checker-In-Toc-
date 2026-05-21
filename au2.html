@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Automata-Based Password Strength Checker</title>
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(020135deg, #1e293b, #0f172a);
+      color: #f1f5f9;
+      margin: 0;
+      padding: 0;
+    }
+
+    .container {
+      background: #334155;
+      padding: 40px;
+      border-radius: 20px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      width: 400px;
+      margin: 40px auto;
+      text-align: center;
+    }
+
+    h2 {
+      margin-bottom: 15px;
+      font-size: 24px;
+      color: #38bdf8;
+    }
+
+    input[type="password"] {
+      width: 90%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 16px;
+      outline: none;
+    }
+
+    .strength-box {
+      padding: 15px;
+      border-radius: 10px;
+      font-weight: bold;
+      transition: background 0.3s ease;
+    }
+
+    .weak { background-color: #dc2626; color: #fff; }
+    .moderate { background-color: #facc15; color: #000; }
+    .strong { background-color: #22c55e; color: #fff; }
+
+    .desc {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #94a3b8;
+    }
+
+    .result-box {
+      background: #1e293b;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 25px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      color: #f1f5f9;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    table, th, td { border: 1px solid #475569; }
+    th, td { padding: 10px; }
+    th { background: #0f172a; color: #38bdf8; }
+
+    button {
+      background: #38bdf8;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
+      color: #0f172a;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s ease;
+    }
+
+    button:hover {
+      background: #0ea5e9;
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+    <h2>Automata-Based Password Strength Checker</h2>
+    <input type="password" id="password" maxlength="16" placeholder="Enter your password" onkeyup="checkPassword()">
+    <div id="strength" class="strength-box">Start typing...</div>
+    <div class="desc" id="desc"></div>
+  </div>
+
+  <div class="result-box" id="resultBox" style="display:none;">
+    <h3>Password Analysis</h3>
+    <table>
+      <tr><th>Password</th><td id="resPassword">-</td></tr>
+      <tr><th>Length</th><td id="resLength">-</td></tr>
+      <tr><th>Lowercase</th><td id="resLower">-</td></tr>
+      <tr><th>Uppercase</th><td id="resUpper">-</td></tr>
+      <tr><th>Digit</th><td id="resDigit">-</td></tr>
+      <tr><th>Special</th><td id="resSpecial">-</td></tr>
+      <tr><th>Total Classes</th><td id="resClasses">-</td></tr>
+      <tr><th>Final DFA State</th><td id="resFinal">-</td></tr>
+    </table>
+  </div>
+
+  <!-- LIVE DFA DIAGRAM -->
+  <div class="result-box">
+    <h3>DFA State Transition (Live)</h3>
+
+    <svg id="dfaSVG" width="520" height="260" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- STATES -->
+      <circle id="stateWeak" cx="120" cy="130" r="45" fill="#dc2626" stroke="#fff" stroke-width="3"></circle>
+      <text x="120" y="135" font-size="14" text-anchor="middle" fill="white">WEAK</text>
+
+      <circle id="stateModerate" cx="260" cy="130" r="45" fill="#475569" stroke="#fff" stroke-width="3"></circle>
+      <text x="260" y="135" font-size="14" text-anchor="middle" fill="white">MODERATE</text>
+
+      <circle id="stateStrong" cx="400" cy="130" r="45" fill="#475569" stroke="#fff" stroke-width="3"></circle>
+      <text x="400" y="135" font-size="14" text-anchor="middle" fill="white">STRONG</text>
+
+      <!-- ARROWS -->
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="white" />
+        </marker>
+      </defs>
+
+      <!-- Weak → Moderate -->
+      <line id="arrowWM" x1="165" y1="130" x2="215" y2="130" stroke="#334155" stroke-width="3" marker-end="url(#arrow)" />
+
+      <!-- Moderate → Strong -->
+      <line id="arrowMS" x1="305" y1="130" x2="355" y2="130" stroke="#334155" stroke-width="3" marker-end="url(#arrow)" />
+
+    </svg>
+
+    <p style="color:#94a3b8; margin-top:10px;">
+      DFA updates automatically as you type.
+    </p>
+  </div>
+
+  <script>
+
+    function getCharType(ch) {
+      if (/[a-z]/.test(ch)) return "lower";
+      if (/[A-Z]/.test(ch)) return "upper";
+      if (/[0-9]/.test(ch)) return "digit";
+      if (/[^a-zA-Z0-9]/.test(ch)) return "special";
+      return "other";
+    }
+
+    function automataEvaluate(password) {
+      let s = { hasLower: 0, hasUpper: 0, hasDigit: 0, hasSpecial: 0 };
+
+      for (let ch of password) {
+        let type = getCharType(ch);
+        if (type === "lower") s.hasLower = 1;
+        if (type === "upper") s.hasUpper = 1;
+        if (type === "digit") s.hasDigit = 1;
+        if (type === "special") s.hasSpecial = 1;
+      }
+
+      let total = s.hasLower + s.hasUpper + s.hasDigit + s.hasSpecial;
+
+      let finalState = "weak";
+      if (password.length < 6 || total <= 1) finalState = "weak";
+      else if (password.length >= 6 && password.length < 10 && total >= 2) finalState = "moderate";
+      else if (password.length >= 10 && total >= 3) finalState = "strong";
+
+      return { ...s, totalClasses: total, finalState };
+    }
+
+    function updateDFA(finalState) {
+      document.getElementById("stateWeak").setAttribute("fill", "#475569");
+      document.getElementById("stateModerate").setAttribute("fill", "#475569");
+      document.getElementById("stateStrong").setAttribute("fill", "#475569");
+
+      document.getElementById("arrowWM").setAttribute("stroke", "#334155");
+      document.getElementById("arrowMS").setAttribute("stroke", "#334155");
+
+      if (finalState === "weak") {
+        document.getElementById("stateWeak").setAttribute("fill", "#dc2626");
+      }
+      else if (finalState === "moderate") {
+        document.getElementById("stateModerate").setAttribute("fill", "#facc15");
+        document.getElementById("arrowWM").setAttribute("stroke", "#facc15");
+      }
+      else if (finalState === "strong") {
+        document.getElementById("stateStrong").setAttribute("fill", "#22c55e");
+        document.getElementById("arrowWM").setAttribute("stroke", "#facc15");
+        document.getElementById("arrowMS").setAttribute("stroke", "#22c55e");
+      }
+    }
+
+    function checkPassword() {
+      let password = document.getElementById("password").value;
+
+      if (password.length > 16) {
+        password = password.substring(0, 16);
+        document.getElementById("password").value = password;
+      }
+
+      const strengthBox = document.getElementById("strength");
+      const desc = document.getElementById("desc");
+      const resultBox = document.getElementById("resultBox");
+
+      if (password.length === 0) {
+        strengthBox.textContent = "Start typing...";
+        strengthBox.className = "strength-box";
+        desc.textContent = "";
+        resultBox.style.display = "none";
+        updateDFA("weak");
+        return;
+      }
+
+      const result = automataEvaluate(password);
+      const strength = result.finalState;
+
+      updateDFA(strength);
+
+      strengthBox.className = "strength-box " + strength;
+      strengthBox.textContent =
+        strength === "weak" ? "Weak Password ❌" :
+        strength === "moderate" ? "Moderate Password ⚠" :
+        "Strong Password ✅";
+
+      desc.textContent =
+        strength === "weak"
+          ? "Use uppercase, numbers, and symbols."
+          : strength === "moderate"
+          ? "Good! Add more symbols or length."
+          : "Excellent! Strong password.";
+
+      document.getElementById("resPassword").textContent = password;
+      document.getElementById("resLength").textContent = password.length;
+      document.getElementById("resLower").textContent = result.hasLower ? "✔ Yes" : "✖ No";
+      document.getElementById("resUpper").textContent = result.hasUpper ? "✔ Yes" : "✖ No";
+      document.getElementById("resDigit").textContent = result.hasDigit ? "✔ Yes" : "✖ No";
+      document.getElementById("resSpecial").textContent = result.hasSpecial ? "✔ Yes" : "✖ No";
+      document.getElementById("resClasses").textContent = result.totalClasses;
+      document.getElementById("resFinal").textContent = strength.toUpperCase();
+
+      resultBox.style.display = "block";
+    }
+
+  </script>
+
+</body>
+</html>
